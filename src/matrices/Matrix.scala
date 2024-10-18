@@ -37,6 +37,10 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
 
 end Matrix
 
+/** Companion object to the [[matrices.Matrix]] class. This object contains
+  * several utility-methods for creating matrices.
+  * 
+  */
 object Matrix:
   /** Create a new HxW [[matrices.Matrix]] with the specified dimensions filled
     * with zeroes.
@@ -85,7 +89,7 @@ object Matrix:
     * @return
     *   the matrix
     */
-  def tabulate[H <: Int: Size, W <: Int: Size, T: Numeric](
+  def tabulate[H: Size, W: Size, T: Numeric](
       func: (Int, Int) => T
   ): Matrix[H, W, T] =
     new Matrix(
@@ -102,7 +106,7 @@ object Matrix:
     * @return
     *   the matrix
     */
-  def identity[S <: Int: Size, T](using num: Numeric[T]): Matrix[S, S, T] =
+  def identity[S: Size, T](using num: Numeric[T]): Matrix[S, S, T] =
     new Matrix(
       Vector.tabulate(size[S], size[S]): (row, col) =>
         if row == col then num.one else num.zero
