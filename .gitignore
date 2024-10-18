@@ -3,3 +3,4 @@
 .bsp
 .vscode
 *.class
+scala-doc

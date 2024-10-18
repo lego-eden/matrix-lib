@@ -1,19 +1,6 @@
 package matrices
 
-import scala.compiletime.ops.int.<
 import scala.math.Numeric.Implicits.infixNumericOps
-
-export Size.size
-
-trait Size[T]:
-  def size: Int
-
-object Size:
-  def size[T](using s: Size[T]): Int = s.size
-
-  given [T <: Int: ValueOf](using 0 < T =:= true): Size[T] = new Size:
-    def size: Int = valueOf[T]
-end Size
 
 extension [T: Numeric](xs: Vector[T])
   infix def dot(ys: Vector[T]): T =
@@ -32,11 +19,13 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     new Matrix(
       Vector.tabulate(height, other.width)(rows(_) dot other.cols(_))
     )
-  
+
   def +(other: Matrix[H, W, T]): Matrix[H, W, T] =
     new Matrix(
-      rows.zip(other.rows).map: (row1, row2) =>
-        row1.zip(row2).map(_ + _)
+      rows
+        .zip(other.rows)
+        .map: (row1, row2) =>
+          row1.zip(row2).map(_ + _)
     )
 
   override def toString: String =
@@ -49,8 +38,8 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
 end Matrix
 
 object Matrix:
-  /** Create a new [[matrices.Matrix]] with the specified dimensions filled with
-    * zeroes.
+  /** Create a new HxW [[matrices.Matrix]] with the specified dimensions filled
+    * with zeroes.
     *
     * @tparam H
     *   the height of the matrix
@@ -67,9 +56,22 @@ object Matrix:
       Vector.fill(size[H], size[W])(num.zero)
     )
 
-  /**
-    * Create a new [[matrices.Matrix]] with the specified dimensions by tabulating
-    * using the specified function.
+  /** Create a new square NxN [[matrices.Matrix]] with the specified size filled
+    * with zeroes.
+    *
+    * @tparam N
+    *   the width and height of the matrix
+    *
+    * @tparam T
+    *   the numeric type of the matrix
+    *
+    * @return
+    *   the matrix
+    */
+  def apply[N: Size, T: Numeric]: Matrix[N, N, T] = apply[N, N, T]
+
+  /** Create a new [[matrices.Matrix]] with the specified dimensions by
+    * tabulating using the specified function.
     *
     * @tparam H
     *   the height of the matrix
@@ -77,7 +79,7 @@ object Matrix:
     *   the width of the matrix
     * @tparam T
     *   the numeric type of the matrix
-    * 
+    *
     * @param func
     *   the function to use for tabulating
     * @return
@@ -90,14 +92,13 @@ object Matrix:
       Vector.tabulate(size[H], size[W])(func)
     )
 
-  /**
-    * The identity matrix of the specified size.
+  /** The identity matrix of the specified size.
     *
     * @tparam S
     *   the size of the matrix
     * @tparam T
     *   the numeric type of the matrix
-    * 
+    *
     * @return
     *   the matrix
     */
