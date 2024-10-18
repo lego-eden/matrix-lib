@@ -10,8 +10,8 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     rows: Vector[Vector[T]]
 ):
   lazy val cols = rows.transpose
-  lazy val height = rows.length
-  lazy val width = cols.length
+  val height = rows.length
+  val width = cols.length
 
   def transpose: Matrix[W, H, T] = new Matrix(cols) // cols are transposed
 
