@@ -55,7 +55,7 @@ object Matrix:
     * @return
     *   the matrix
     */
-  def apply[H: Size, W: Size, T](using num: Numeric[T]): Matrix[W, H, T] =
+  def apply[H: Size, W: Size, T](using num: Numeric[T]): Matrix[H, W, T] =
     new Matrix(
       Vector.fill(size[H], size[W])(num.zero)
     )
