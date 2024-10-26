@@ -2,14 +2,15 @@ package matrices
 
 import scala.math.Numeric.Implicits.infixNumericOps
 import scala.annotation.targetName
+import scala.compiletime.ops.int.*
+import scala.util.NotGiven
 
-/** A generic, type-safe, mathematical matrix whose elements can be of any
-  * numeric type.
+/** A generic, type-safe, matrix.
   *
   * @param rows
   *   the rows of the matrix
   */
-case class Matrix[H: Size, W: Size, T: Numeric] private (
+case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     rows: Vector[Vector[T]]
 ):
   /** the columns of the matrix */
@@ -20,6 +21,11 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
 
   /** the width of the matrix */
   lazy val width = size[W]
+
+  lazy val diagonals: Vector[T] =
+    0.until(width min height)
+      .map(i => apply(i, i))
+      .toVector
 
   /** Return the element at the specified row and column.
     *
@@ -43,7 +49,7 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     * @return
     *   the updated matrix
     */
-  def set(row: Int, col: Int, elem: T): Matrix[H, W, T] =
+  def set(row: Int, col: Int, elem: => T): Matrix[H, W, T] =
     new Matrix(
       rows.updated(row, rows(row).updated(col, elem))
     )
@@ -61,7 +67,7 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     *   the updated matrix
     */
   @targetName("set2")
-  def set(row: Int, col: Int)(elem: T): Matrix[H, W, T] = set(row, col, elem)
+  def set(row: Int, col: Int)(elem: => T): Matrix[H, W, T] = set(row, col, elem)
 
   /** The transposed version of this matrix.
     *
@@ -78,7 +84,9 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     * @return
     *   the resulting matrix of the multiplication
     */
-  def *[W2: Size](other: Matrix[W, W2, T]): Matrix[H, W2, T] =
+  def *[W2 <: Int: Size](other: Matrix[W, W2, T])(using
+      Numeric[T]
+  ): Matrix[H, W2, T] =
     new Matrix(
       Vector.tabulate(height, other.width)(rows(_) dot other.cols(_))
     )
@@ -91,7 +99,7 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     * @return
     *   the scaled matrix
     */
-  def *(scalar: T): Matrix[H, W, T] =
+  def *(scalar: T)(using Numeric[T]): Matrix[H, W, T] =
     new Matrix(
       rows.map(row => row.map(_ * scalar))
     )
@@ -103,7 +111,7 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
     * @return
     *   the matrix sum
     */
-  def +(other: Matrix[H, W, T]): Matrix[H, W, T] =
+  def +(other: Matrix[H, W, T])(using Numeric[T]): Matrix[H, W, T] =
     new Matrix(
       rows
         .zip(other.rows)
@@ -148,6 +156,17 @@ case class Matrix[H: Size, W: Size, T: Numeric] private (
           func(elem)
     )
 
+  def subMatrix(row: Int, col: Int)(using
+      1 < H =:= true,
+      1 < W =:= true,
+      row.type < H =:= true,
+      col.type < W =:= true,
+      Numeric[T]
+  ): Matrix[H - 1, W - 1, T] =
+    new Matrix(
+      rows.subRegion(row, col)
+    )
+
   override def toString: String =
     "\n" +
       rows
@@ -174,8 +193,8 @@ object Matrix:
     *   the matrix
     */
   def zero[T](height: Int, width: Int)(using
-      _h: Size[height.type],
-      _w: Size[width.type],
+      h: Size[height.type],
+      w: Size[width.type],
       num: Numeric[T]
   ): Matrix[height.type, width.type, T] =
     new Matrix(
@@ -194,8 +213,42 @@ object Matrix:
     *   the matrix
     */
   def zero[T: Numeric](size: Int)(using
-      Size[size.type]
+      s: Size[size.type]
   ): Matrix[size.type, size.type, T] = zero[T](size, size)
+
+  /** Create a new [[Matrix]] of the specified dimensions filled with a provided
+    * value.
+    *
+    * @param height
+    *   the number rows in the matrix
+    * @param width
+    *   the number of columns in the matrix
+    * @param elem
+    *   the element to fill the matrix with
+    * @return
+    *   the matrix
+    */
+  def fill[T](height: Int, width: Int)(elem: => T)(using
+      h: Size[height.type],
+      w: Size[width.type]
+  ): Matrix[height.type, width.type, T] =
+    new Matrix(
+      Vector.fill(height, width)(elem)
+    )
+
+  /** Create a new square [[Matrix]] with the specified size filled with the
+    * provided element.
+    *
+    * @param size
+    *   the number of rows and columns in the matrix
+    * @param elem
+    *   the element to fill the matrix with
+    * @return
+    *   the newly created matrix
+    */
+  def fill[T](size: Int)(elem: => T)(using
+      s: Size[size.type]
+  ): Matrix[size.type, size.type, T] = fill(size, size)(elem)
 
   /** Create a new [[Matrix]] with the specified dimensions by tabulating using
     * the specified function.
@@ -212,14 +265,14 @@ object Matrix:
     * @return
     *   the matrix
     */
-  def tabulate[T: Numeric](
+  def tabulate[T](
       height: Int,
       width: Int
   )(
       func: (Int, Int) => T
   )(using
-      _h: Size[height.type],
-      _w: Size[width.type]
+      h: Size[height.type],
+      w: Size[width.type]
   ): Matrix[height.type, width.type, T] =
     new Matrix(
       Vector.tabulate(height, width)(func)
@@ -236,38 +289,25 @@ object Matrix:
     *   the matrix
     */
   def identity[T: Numeric](size: Int)(using
-      _s: Size[size.type]
+      s: Size[size.type]
   ): Matrix[size.type, size.type, T] =
     identity[size.type, T]
 
-  private def identity[S: Size, T](using num: Numeric[T]): Matrix[S, S, T] =
+  private def identity[S <: Int: Size, T](using
+      num: Numeric[T]
+  ): Matrix[S, S, T] =
     new Matrix(
       Vector.tabulate(size[S], size[S]): (row, col) =>
         if row == col then num.one else num.zero
     )
 
   /** Extension methods exclusive to square matrices */
-  extension [S: Size, T: Numeric](mat: Matrix[S, S, T])
-    infix def pow(n: Int): Matrix[S, S, T] =
+  extension [S <: Int: Size, T](mat: Matrix[S, S, T])
+    infix def pow(n: Int)(using Numeric[T]): Matrix[S, S, T] =
       (0 until n).foldLeft(Matrix.identity[S, T])((acc, _) => acc * mat)
-  
-  extension [T: Numeric](mat: Matrix[1, 1, T])
-    /** trivial determinant when the matrix is 1x1 */
-    @targetName("determinant1")
-    def determinant: T = mat(0, 0)
-  
-  extension [T](using num: Numeric[T])(mat: Matrix[2, 2, T])
-    @targetName("determinant2")
-    def determinant: T =
-      val a: T = mat(0, 0)
-      val b: T = mat(0, 1)
-      val c: T = mat(1, 0)
-      val d: T = mat(1, 1)
-
-      (num.times(a, d)) - (num.times(b, c))
-    end determinant
-
-  extension [T: Numeric](x: T)
-    def *[H, W](mat: Matrix[H, W, T]): Matrix[H, W, T] = mat * x
-  
+  end extension
 end Matrix
+
+object numericExtensions:
+  extension [T: Numeric](x: T)
+    def *[H <: Int, W <: Int](mat: Matrix[H, W, T]): Matrix[H, W, T] = mat * x
