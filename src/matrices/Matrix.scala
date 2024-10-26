@@ -4,6 +4,7 @@ import scala.math.Numeric.Implicits.infixNumericOps
 import scala.annotation.targetName
 import scala.compiletime.ops.int.*
 import scala.util.NotGiven
+import scala.annotation.implicitNotFound
 
 /** A generic, type-safe, matrix.
   *
@@ -17,10 +18,10 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
   lazy val cols = rows.transpose
 
   /** the height of the matrix */
-  lazy val height = size[H]
+  lazy val height = rows.length
 
   /** the width of the matrix */
-  lazy val width = size[W]
+  lazy val width = rows(0).length
 
   lazy val diagonals: Vector[T] =
     0.until(width min height)
@@ -157,11 +158,13 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     )
 
   def subMatrix(row: Int, col: Int)(using
-      1 < H =:= true,
-      1 < W =:= true,
-      row.type < H =:= true,
-      col.type < W =:= true,
-      Numeric[T]
+      @implicitNotFound(
+        "The matrix must be at least 2 high to create a sub-matrix"
+      ) h: Size[H - 1],
+      @implicitNotFound(
+        "The matrix must be at least 2 wide to create a sub-matrix"
+      ) w: Size[W - 1],
+      num: Numeric[T]
   ): Matrix[H - 1, W - 1, T] =
     new Matrix(
       rows.subRegion(row, col)
@@ -289,20 +292,22 @@ object Matrix:
     *   the matrix
     */
   def identity[T: Numeric](size: Int)(using
-      s: Size[size.type]
+      s: Size[size.type],
+      sizeVal: ValueOf[size.type]
   ): Matrix[size.type, size.type, T] =
     identity[size.type, T]
 
   private def identity[S <: Int: Size, T](using
-      num: Numeric[T]
+      num: Numeric[T],
+      sizeVal: ValueOf[S]
   ): Matrix[S, S, T] =
     new Matrix(
-      Vector.tabulate(size[S], size[S]): (row, col) =>
+      Vector.tabulate(sizeVal.value, sizeVal.value): (row, col) =>
         if row == col then num.one else num.zero
     )
 
   /** Extension methods exclusive to square matrices */
-  extension [S <: Int: Size, T](mat: Matrix[S, S, T])
+  extension [S <: Int: Size: ValueOf, T](mat: Matrix[S, S, T])
     infix def pow(n: Int)(using Numeric[T]): Matrix[S, S, T] =
       (0 until n).foldLeft(Matrix.identity[S, T])((acc, _) => acc * mat)
   end extension
