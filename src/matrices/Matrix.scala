@@ -29,6 +29,22 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       .map(i => apply(i, i))
       .toVector
 
+  def rank(using Numeric[T]): Int =
+    val minSeq = if rows.length <= cols.length then rows else cols
+
+    val parallelRows =
+      for
+        r0 <- minSeq.indices
+        r1 <- (r0 + 1) until minSeq.length
+      yield minSeq(r0) nonZeroParallel minSeq(r1)
+
+    // the number of rows containing only zeroes
+    val zeroRows =
+      minSeq.count(_.isZero)
+
+    minSeq.length - parallelRows.count(b => b) - zeroRows
+  end rank
+
   /** Return the element at the specified row and column.
     *
     * @param row
@@ -219,6 +235,11 @@ object Matrix:
   def zero[T: Numeric](size: Int)(using
       s: Size[size.type]
   ): Matrix[size.type, size.type, T] = zero[T](size, size)
+
+  def apply[RowsTuple <: NonEmptyTuple: Square](
+      rows: RowsTuple
+  ): Matrix[Tuple.Size[RowsTuple], Width[RowsTuple], Tuple.Union[RowsTuple]] =
+    ???
 
   /** Create a new [[Matrix]] of the specified dimensions filled with a provided
     * value.
