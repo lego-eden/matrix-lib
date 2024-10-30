@@ -4,6 +4,7 @@ import scala.math.Numeric.Implicits.infixNumericOps
 import scala.math.Ordering.Implicits.infixOrderingOps
 import scala.annotation.targetName
 import scala.compiletime.ops.int.*
+import scala.compiletime.constValue
 import scala.util.NotGiven
 import scala.annotation.implicitNotFound
 
@@ -30,20 +31,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       .toVector
 
   def rank(using Numeric[T]): Int =
-    val minSeq = if rows.length <= cols.length then rows else cols
-
-    val parallelRows =
-      for
-        r0 <- minSeq.indices
-        r1 <- (r0 + 1) until minSeq.length
-      yield minSeq(r0) nonZeroParallel minSeq(r1)
-
-    // the number of rows containing only zeroes
-    val zeroRows =
-      minSeq.count(_.isZero)
-
-    minSeq.length - parallelRows.count(b => b) - zeroRows
-  end rank
+    reduced.rows.filterNot(_.isZero).size
 
   /** Return the element at the specified row and column.
     *
@@ -146,7 +134,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     *   the resulting matrix of the subtraction.
     */
   def -(other: Matrix[H, W, T])(using num: Numeric[T]): Matrix[H, W, T] =
-    this + -this
+    this + -other
 
   def unary_-(using num: Numeric[T]): Matrix[H, W, T] = this * -num.one
 
@@ -186,6 +174,59 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     new Matrix(
       rows.subRegion(row, col)
     )
+
+  def reduced(using num: Numeric[T]): Matrix[H, W, T] =
+    def reduced(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+      def recurse(
+          firstRow: Option[Vector[T]],
+          firstCol: Vector[T],
+          rows: Vector[Vector[T]]
+      ): Vector[Vector[T]] =
+        val rest =
+          (firstCol +: reduced(
+            rows.tail.transpose.tail.transpose
+          ).transpose).transpose
+        firstRow match
+          case Some(row) => row +: rest
+          case None => rest
+        
+
+      val cols = rows.transpose
+      val minPivotRow: Option[Int] = rows.indices
+        .filterNot(r => rows(r)(0) == num.zero)
+        .minByOption(r => rows(r)(0).abs)
+
+      minPivotRow match
+        case Some(minRow) =>
+          val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0)
+          val pivot: T = pivotRow(0)
+          val reducedRows = rows.indices
+            .filter(r => r != minRow)
+            .foldLeft(rows): (acc, r) =>
+              val scaledRow = rows(r) * pivot
+              val reducedRow = scaledRow - (pivotRow * rows(r)(0))
+              acc.updated(r, reducedRow)
+          val newRows = reducedRows
+            .updated(minRow, reducedRows(0))
+            .updated(0, pivotRow)
+          val reducedOpt =
+            for
+              firstRow <- newRows.headOption
+              firstCol <- newRows.tail.transpose.headOption
+            yield recurse(Some(firstRow), firstCol, newRows)
+          reducedOpt match
+            case None =>
+              newRows
+            case Some(reducedRows) =>
+              reducedRows
+        case None => // the first column contains only zeroes, nothing to do
+          if rows.isEmpty || rows.tail.isEmpty then // base case reached
+            rows
+          else recurse(None, rows.transpose.head, rows)
+    end reduced
+
+    new Matrix(reduced(rows))
+  end reduced
 
   override def toString: String =
     "\n" +
@@ -236,10 +277,32 @@ object Matrix:
       s: Size[size.type]
   ): Matrix[size.type, size.type, T] = zero[T](size, size)
 
-  def apply[RowsTuple <: NonEmptyTuple: Square](
-      rows: RowsTuple
-  ): Matrix[Tuple.Size[RowsTuple], Width[RowsTuple], Tuple.Union[RowsTuple]] =
-    ???
+  def apply(
+      rows: NonEmptyTuple
+  )(using
+      widthValue: ValueOf[MinLength[rows.type]],
+      heightSize: Size[Tuple.Size[rows.type]],
+      widthSize: Size[MinLength[rows.type]]
+  ): Matrix[Tuple.Size[rows.type], MinLength[rows.type], NestedUnionType[
+    rows.type
+  ]] =
+    val height: Tuple.Size[rows.type] = rows.size
+    val width: MinLength[rows.type] = widthValue.value
+
+    val elementFunc: (Int, Int) => NestedUnionType[rows.type] =
+      if width > 1 && hasConstantWidth[rows.type] then
+        (r, c) =>
+          // the "width" of the tuple is greater than 2 =>
+          //    safe to cast any element of it as a tuple
+          rows(r)
+            .asInstanceOf[NonEmptyTuple](c)
+            .asInstanceOf[NestedUnionType[rows.type]]
+      else (r, c) => rows(r).asInstanceOf[NestedUnionType[rows.type]]
+
+    new Matrix(
+      Vector.tabulate(height, width)(elementFunc)
+    )
+  end apply
 
   /** Create a new [[Matrix]] of the specified dimensions filled with a provided
     * value.
