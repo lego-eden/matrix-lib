@@ -32,7 +32,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       .map(i => apply(i, i))
       .toVector
 
-  def rank(using Numeric[T]): Int =
+  def rank(using Integral[T] | Fractional[T]): Int =
     ref.rows.filterNot(_.isZero).size
 
   /** Return the element at the specified row and column.
@@ -177,9 +177,12 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       rows.subRegion(row, col)
     )
 
-  private def refWithFactor(using num: Numeric[T]): (Matrix[H, W, T], T) =
+  private def refWithTransform(using
+      num: Integral[T] | Fractional[T]
+  ): (Matrix[H, W, T], T, T) =
     // updates when swapping rows or multiplying row by constant
     var detFactor: T = num.one
+    var detDivisor: T = num.one
 
     def ref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
       def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
@@ -188,7 +191,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
           (rows.transpose.head +: // the first column
             ref(rows.colTail).transpose // the reduced columns.tail
           ).transpose // convert columns to rows
-  
+
       val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
 
       if rows.isEmpty then rows // base case reached
@@ -198,7 +201,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       else
         val cols = rows.transpose
         val minRow: Int = nonZeroRows.minBy(rows(_)(0).abs)
-        
+
         val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0).sign
         if rows(minRow)(0).sign == -num.one then detFactor = -detFactor
         val pivot: T = pivotRow(0)
@@ -212,19 +215,38 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
         val newRows = reducedRows // swap first- and pivot-row
           .updated(minRow, reducedRows(0))
           .updated(0, pivotRow)
-        if minRow != 0 then detFactor = -detFactor
-        newRows.head +: recurse(newRows.tail)
+        if minRow != 0 then
+          detFactor = -detFactor // only update the detfactor if a swap happened
+        detDivisor *= newRows.head.gcd
+        newRows.head.simplify +: recurse(newRows.tail)
       end if
     end ref
 
-    (new Matrix(ref(rows)), detFactor)
-  end refWithFactor
+    (new Matrix(ref(rows)), detFactor, detDivisor)
+  end refWithTransform
 
   /** Returns the row echelon form of this matrix.
     *
-    * @return the row echelon form of the matrix
+    * @return
+    *   the row echelon form of the matrix
     */
-  def ref(using Numeric[T]): Matrix[H, W, T] = refWithFactor._1
+  def ref(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
+    refWithTransform._1
+
+  /** Returns the reduced row echelon form of this matrix.
+    *
+    * @return
+    *   the reduced row echelon form of the matrix
+    */
+  def rref(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
+    // the "rows" parameter is in reduced form
+    def rref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+      ???
+
+    end rref
+
+    new Matrix(rref(ref.rows))
+  end rref
 
   override def toString: String =
     "\n" +
@@ -290,7 +312,7 @@ object Matrix:
     val elementFunc: (Int, Int) => NestedUnionType[rows.type] =
       if width > 1 && hasConstantWidth[rows.type] then
         (r, c) =>
-          // the "width" of the tuple is greater than 2 =>
+          // the "width" of the tuple is greater than 1 =>
           //    safe to cast any element of it as a tuple
           rows(r)
             .asInstanceOf[NonEmptyTuple](c)
@@ -394,10 +416,35 @@ object Matrix:
     infix def pow(n: Int)(using Numeric[T]): Matrix[S, S, T] =
       (0 until n).foldLeft(Matrix.identity[S, T])((acc, _) => acc * mat)
 
-    def determinant(using num: Integral[T]): T =
-      val (reduced, factor) = mat.refWithFactor
-      num.quot(reduced.diagonals.product, factor)
+    /** Compute and return the determinant of this matrix.
+      *
+      * NOTE: The return value of this method may be wrong if an integer
+      * overflow occurs. To avoid this, convert the matrix elements to a type
+      * which does not have overflow such as BigInt, and then convert back.
+      *
+      * ```
+      * val mat = Matrix.fill(5, 5)(util.Random.nextInt(10))
+      * val maybeDet = mat.determinant
+      * val guaranteedDet = mat.map(BigInt(_)).determinant.toInt
+      * ```
+      *
+      * @return
+      *   the determinant
+      */
+    def determinant(using Integral[T] | Fractional[T]): T =
+      val (reduced, factor, divisor) = mat.refWithTransform
+      val det = reduced.diagonals.product
+      div(det * divisor, factor)
     end determinant
+
+    /** Compute and return the determinant of this matrix. Alias for
+      * [[Matrix.determinant]].
+      *
+      * @return
+      *   the determinant
+      */
+    def det(using Integral[T] | Fractional[T]): T =
+      mat.determinant
   end extension
 end Matrix
 

@@ -3,6 +3,7 @@ package matrices
 import scala.math.Numeric.Implicits.infixNumericOps
 import scala.compiletime.ops.int.Min
 import scala.compiletime.constValue
+import scala.annotation.tailrec
 
 private object util:
 
@@ -25,6 +26,25 @@ private object util:
 
     def *(n: T): Vector[T] = xs.map(_ * n)
     def -(ys: Vector[T]): Vector[T] = xs.zip(ys).map((x, y) => x - y)
+  end extension
+
+  extension [T](xs: Vector[T])(using num: Integral[T] | Fractional[T])
+    def gcd: T =
+      num match
+        case int: Integral[T] =>
+          given Integral[T] = int
+          xs.reduce(util.gcd)
+        case frac: Fractional[T] =>
+          if xs.forall(_.isWhole(using frac)) then
+            given Integral[Int] = scala.math.Numeric.IntIsIntegral
+            frac.fromInt(xs.map(_.toInt).gcd)
+          else frac.one
+
+  extension [T](xs: Vector[T])(using num: Integral[T] | Fractional[T])
+    def simplify: Vector[T] =
+      val gcd = xs.gcd
+      if gcd != num.one then xs.map(div(_, gcd))
+      else xs
 
   extension [T: Numeric](xss: Vector[Vector[T]])
     def subRegion(row: Int, col: Int): Vector[Vector[T]] =
@@ -38,6 +58,23 @@ private object util:
 
     def colTail: Vector[Vector[T]] =
       xss.transpose.tail.transpose
+  end extension
+
+  extension [T](x: T)(using num: Fractional[T])
+    def isWhole: Boolean = x == num.fromInt(x.toInt)
+
+  @tailrec
+  def gcd[T](a: T, b: T)(using num: Integral[T]): T =
+    if b == 0 then a
+    else gcd(b, num.rem(a, b))
+
+  def div[T](a: T, b: T)(using num: Integral[T] | Fractional[T]): T =
+    num match
+      case int: Integral[T]    => int.quot(a, b)
+      case frac: Fractional[T] => frac.div(a, b)
+
+  def hasConstantWidth[Tup <: NonEmptyTuple]: Boolean =
+    constValue[HasConstantWidth[Tup]]
 
   type MinLength[Tup <: NonEmptyTuple] <: Int = Tup match
     case x *: xs =>
@@ -56,9 +93,6 @@ private object util:
       case Invariant[Tuple.Map[Tup, [_] =>> Length[Tuple.Head[Tup]]]] => true
       case _                                                          => false
 
-  def hasConstantWidth[Tup <: NonEmptyTuple]: Boolean =
-    constValue[HasConstantWidth[Tup]]
-
   type NestedUnionType[Tup <: NonEmptyTuple] = MinLength[Tup] match
     case 1 => Tuple.Union[Tup]
     case _ =>
@@ -69,4 +103,5 @@ private object util:
         case (t, NonEmptyTuple)          => t | NestedUnionType[Tuple.Tail[Tup]]
         case (t, EmptyTuple)             => t
 
+  infix type ||[F[_], G[_]] = [t] =>> F[t] | G[t]
 end util
