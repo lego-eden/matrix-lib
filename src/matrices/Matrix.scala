@@ -33,7 +33,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       .toVector
 
   def rank(using Numeric[T]): Int =
-    reduced.rows.filterNot(_.isZero).size
+    ref.rows.filterNot(_.isZero).size
 
   /** Return the element at the specified row and column.
     *
@@ -177,16 +177,16 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       rows.subRegion(row, col)
     )
 
-  private def reducedWithFactor(using num: Numeric[T]): (Matrix[H, W, T], T) =
+  private def refWithFactor(using num: Numeric[T]): (Matrix[H, W, T], T) =
     // updates when swapping rows or multiplying row by constant
     var detFactor: T = num.one
 
-    def reduced(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+    def ref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
       def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
         if rows.isEmpty then rows
         else
           (rows.transpose.head +: // the first column
-            reduced(rows.colTail).transpose // the reduced columns.tail
+            ref(rows.colTail).transpose // the reduced columns.tail
           ).transpose // convert columns to rows
   
       val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
@@ -215,12 +215,16 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
         if minRow != 0 then detFactor = -detFactor
         newRows.head +: recurse(newRows.tail)
       end if
-    end reduced
+    end ref
 
-    (new Matrix(reduced(rows)), detFactor)
-  end reducedWithFactor
+    (new Matrix(ref(rows)), detFactor)
+  end refWithFactor
 
-  def reduced(using Numeric[T]): Matrix[H, W, T] = reducedWithFactor._1
+  /** Returns the row echelon form of this matrix.
+    *
+    * @return the row echelon form of the matrix
+    */
+  def ref(using Numeric[T]): Matrix[H, W, T] = refWithFactor._1
 
   override def toString: String =
     "\n" +
@@ -391,7 +395,7 @@ object Matrix:
       (0 until n).foldLeft(Matrix.identity[S, T])((acc, _) => acc * mat)
 
     def determinant(using num: Integral[T]): T =
-      val (reduced, factor) = mat.reducedWithFactor
+      val (reduced, factor) = mat.refWithFactor
       num.quot(reduced.diagonals.product, factor)
     end determinant
   end extension
