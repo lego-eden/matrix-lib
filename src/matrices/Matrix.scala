@@ -177,13 +177,18 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       rows.subRegion(row, col)
     )
 
-  def reduced(using num: Numeric[T]): Matrix[H, W, T] =
+  private def reducedWithFactor(using num: Numeric[T]): (Matrix[H, W, T], T) =
+    // updates when swapping rows or multiplying row by constant
+    var detFactor: T = num.one
+
     def reduced(rows: Vector[Vector[T]]): Vector[Vector[T]] =
       def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
-        (rows.transpose.head +: // the first column
-          reduced(rows.colTail).transpose // the reduced columns.tail
-        ).transpose // convert columns to rows
-      
+        if rows.isEmpty then rows
+        else
+          (rows.transpose.head +: // the first column
+            reduced(rows.colTail).transpose // the reduced columns.tail
+          ).transpose // convert columns to rows
+  
       val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
 
       if rows.isEmpty then rows // base case reached
@@ -195,22 +200,27 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
         val minRow: Int = nonZeroRows.minBy(rows(_)(0).abs)
         
         val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0).sign
+        if rows(minRow)(0).sign == -num.one then detFactor = -detFactor
         val pivot: T = pivotRow(0)
-        val reducedRows = rows.indices
+        val reducedRows = nonZeroRows
           .filter(r => r != minRow)
           .foldLeft(rows): (acc, r) =>
             val scaledRow = rows(r) * pivot
+            detFactor *= pivot // row was multiplied by a constant
             val reducedRow = scaledRow - (pivotRow * rows(r)(0))
             acc.updated(r, reducedRow)
         val newRows = reducedRows // swap first- and pivot-row
           .updated(minRow, reducedRows(0))
           .updated(0, pivotRow)
+        if minRow != 0 then detFactor = -detFactor
         newRows.head +: recurse(newRows.tail)
       end if
     end reduced
 
-    new Matrix(reduced(rows))
-  end reduced
+    (new Matrix(reduced(rows)), detFactor)
+  end reducedWithFactor
+
+  def reduced(using Numeric[T]): Matrix[H, W, T] = reducedWithFactor._1
 
   override def toString: String =
     "\n" +
@@ -380,67 +390,9 @@ object Matrix:
     infix def pow(n: Int)(using Numeric[T]): Matrix[S, S, T] =
       (0 until n).foldLeft(Matrix.identity[S, T])((acc, _) => acc * mat)
 
-    def determinant(using num: Fractional[T]): T =
-      def LUPDecompose(
-          original: Vector[Vector[T]]
-      ): (Vector[Vector[T]], Vector[Int]) =
-        val n = original.length
-        var P = (0 to n).toVector
-        var A = original
-
-        for i <- 0 until n do
-          var maxA = num.zero
-          var imax = i
-
-          for k <- i until n do
-            val absA = A(k)(i).abs
-            if absA > maxA then
-              maxA = absA
-              imax = k
-          end for
-
-          if imax != i then
-            // pivoting P
-            val tmp = P(i)
-            P = P.updated(i, P(imax))
-            P = P.updated(imax, tmp)
-            // pivoting rows of A
-            val tmpRow = A(i)
-            A = A.updated(i, A(imax))
-            A = A.updated(imax, tmpRow)
-
-            // counting pivots starting from n (for determinant)
-            P = P.updated(n, P(n) + 1)
-          end if
-
-          for j <- i + 1 until n do
-            A = A.updated(j, A(j).updated(i, num.div(A(j)(i), A(i)(i))))
-
-            for k <- i + 1 until n do
-              A = A.updated(j, A(j).updated(k, A(j)(k) - (A(j)(i) * A(i)(k))))
-        end for
-
-        println(new Matrix[S, S, T](A))
-
-        // the decomposed matrix on the form A=(L-E)+U such that P*A=L*U
-        (A, P)
-      end LUPDecompose
-
-      // A, P filled in LUPDecompose. n is the dimension.
-      // Returns the determinant of the original matrix.
-      def LUPDeterminant(A: Vector[Vector[T]], P: Vector[Int]): T =
-        val n = A.length
-
-        val det = (1 until n).foldLeft(A(0)(0)): (acc, i) =>
-          acc * A(i)(i)
-
-        if (P(n) - n) % 2 == 0 then det else -det
-      end LUPDeterminant
-
-      // call the helper functions and return its values
-      val (a, p) = LUPDecompose(mat.rows)
-      LUPDeterminant(a, p)
-
+    def determinant(using num: Integral[T]): T =
+      val (reduced, factor) = mat.reducedWithFactor
+      num.quot(reduced.diagonals.product, factor)
     end determinant
   end extension
 end Matrix
