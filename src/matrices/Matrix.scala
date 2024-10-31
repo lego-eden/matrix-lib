@@ -4,8 +4,11 @@ import scala.math.Numeric.Implicits.infixNumericOps
 import scala.math.Ordering.Implicits.infixOrderingOps
 import scala.annotation.targetName
 import scala.compiletime.ops.int.*
+import scala.compiletime.constValue
 import scala.util.NotGiven
 import scala.annotation.implicitNotFound
+
+import util.*
 
 /** A generic, type-safe, matrix.
   *
@@ -30,20 +33,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
       .toVector
 
   def rank(using Numeric[T]): Int =
-    val minSeq = if rows.length <= cols.length then rows else cols
-
-    val parallelRows =
-      for
-        r0 <- minSeq.indices
-        r1 <- (r0 + 1) until minSeq.length
-      yield minSeq(r0) nonZeroParallel minSeq(r1)
-
-    // the number of rows containing only zeroes
-    val zeroRows =
-      minSeq.count(_.isZero)
-
-    minSeq.length - parallelRows.count(b => b) - zeroRows
-  end rank
+    reduced.rows.filterNot(_.isZero).size
 
   /** Return the element at the specified row and column.
     *
@@ -146,7 +136,7 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     *   the resulting matrix of the subtraction.
     */
   def -(other: Matrix[H, W, T])(using num: Numeric[T]): Matrix[H, W, T] =
-    this + -this
+    this + -other
 
   def unary_-(using num: Numeric[T]): Matrix[H, W, T] = this * -num.one
 
@@ -186,6 +176,41 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     new Matrix(
       rows.subRegion(row, col)
     )
+
+  def reduced(using num: Numeric[T]): Matrix[H, W, T] =
+    def reduced(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+      def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+        (rows.transpose.head +: // the first column
+          reduced(rows.colTail).transpose // the reduced columns.tail
+        ).transpose // convert columns to rows
+      
+      val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
+
+      if rows.isEmpty then rows // base case reached
+      else if nonZeroRows.isEmpty then
+        // the first column contains only zeroes. Discard it and recurse
+        recurse(rows)
+      else
+        val cols = rows.transpose
+        val minRow: Int = nonZeroRows.minBy(rows(_)(0).abs)
+        
+        val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0).sign
+        val pivot: T = pivotRow(0)
+        val reducedRows = rows.indices
+          .filter(r => r != minRow)
+          .foldLeft(rows): (acc, r) =>
+            val scaledRow = rows(r) * pivot
+            val reducedRow = scaledRow - (pivotRow * rows(r)(0))
+            acc.updated(r, reducedRow)
+        val newRows = reducedRows // swap first- and pivot-row
+          .updated(minRow, reducedRows(0))
+          .updated(0, pivotRow)
+        newRows.head +: recurse(newRows.tail)
+      end if
+    end reduced
+
+    new Matrix(reduced(rows))
+  end reduced
 
   override def toString: String =
     "\n" +
@@ -236,10 +261,32 @@ object Matrix:
       s: Size[size.type]
   ): Matrix[size.type, size.type, T] = zero[T](size, size)
 
-  def apply[RowsTuple <: NonEmptyTuple: Square](
-      rows: RowsTuple
-  ): Matrix[Tuple.Size[RowsTuple], Width[RowsTuple], Tuple.Union[RowsTuple]] =
-    ???
+  def apply(
+      rows: NonEmptyTuple
+  )(using
+      widthValue: ValueOf[MinLength[rows.type]],
+      heightSize: Size[Tuple.Size[rows.type]],
+      widthSize: Size[MinLength[rows.type]]
+  ): Matrix[Tuple.Size[rows.type], MinLength[rows.type], NestedUnionType[
+    rows.type
+  ]] =
+    val height: Tuple.Size[rows.type] = rows.size
+    val width: MinLength[rows.type] = widthValue.value
+
+    val elementFunc: (Int, Int) => NestedUnionType[rows.type] =
+      if width > 1 && hasConstantWidth[rows.type] then
+        (r, c) =>
+          // the "width" of the tuple is greater than 2 =>
+          //    safe to cast any element of it as a tuple
+          rows(r)
+            .asInstanceOf[NonEmptyTuple](c)
+            .asInstanceOf[NestedUnionType[rows.type]]
+      else (r, c) => rows(r).asInstanceOf[NestedUnionType[rows.type]]
+
+    new Matrix(
+      Vector.tabulate(height, width)(elementFunc)
+    )
+  end apply
 
   /** Create a new [[Matrix]] of the specified dimensions filled with a provided
     * value.
