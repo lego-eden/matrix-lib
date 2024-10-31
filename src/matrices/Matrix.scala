@@ -8,6 +8,8 @@ import scala.compiletime.constValue
 import scala.util.NotGiven
 import scala.annotation.implicitNotFound
 
+import util.*
+
 /** A generic, type-safe, matrix.
   *
   * @param rows
@@ -177,52 +179,34 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
 
   def reduced(using num: Numeric[T]): Matrix[H, W, T] =
     def reduced(rows: Vector[Vector[T]]): Vector[Vector[T]] =
-      def recurse(
-          firstRow: Option[Vector[T]],
-          firstCol: Vector[T],
-          rows: Vector[Vector[T]]
-      ): Vector[Vector[T]] =
-        val rest =
-          (firstCol +: reduced(
-            rows.tail.transpose.tail.transpose
-          ).transpose).transpose
-        firstRow match
-          case Some(row) => row +: rest
-          case None => rest
+      def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+        (rows.transpose.head +: // the first column
+          reduced(rows.colTail).transpose // the reduced columns.tail
+        ).transpose // convert columns to rows
+      
+      val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
+
+      if rows.isEmpty then rows // base case reached
+      else if nonZeroRows.isEmpty then
+        // the first column contains only zeroes. Discard it and recurse
+        recurse(rows)
+      else
+        val cols = rows.transpose
+        val minRow: Int = nonZeroRows.minBy(rows(_)(0).abs)
         
-
-      val cols = rows.transpose
-      val minPivotRow: Option[Int] = rows.indices
-        .filterNot(r => rows(r)(0) == num.zero)
-        .minByOption(r => rows(r)(0).abs)
-
-      minPivotRow match
-        case Some(minRow) =>
-          val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0)
-          val pivot: T = pivotRow(0)
-          val reducedRows = rows.indices
-            .filter(r => r != minRow)
-            .foldLeft(rows): (acc, r) =>
-              val scaledRow = rows(r) * pivot
-              val reducedRow = scaledRow - (pivotRow * rows(r)(0))
-              acc.updated(r, reducedRow)
-          val newRows = reducedRows
-            .updated(minRow, reducedRows(0))
-            .updated(0, pivotRow)
-          val reducedOpt =
-            for
-              firstRow <- newRows.headOption
-              firstCol <- newRows.tail.transpose.headOption
-            yield recurse(Some(firstRow), firstCol, newRows)
-          reducedOpt match
-            case None =>
-              newRows
-            case Some(reducedRows) =>
-              reducedRows
-        case None => // the first column contains only zeroes, nothing to do
-          if rows.isEmpty || rows.tail.isEmpty then // base case reached
-            rows
-          else recurse(None, rows.transpose.head, rows)
+        val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0).sign
+        val pivot: T = pivotRow(0)
+        val reducedRows = rows.indices
+          .filter(r => r != minRow)
+          .foldLeft(rows): (acc, r) =>
+            val scaledRow = rows(r) * pivot
+            val reducedRow = scaledRow - (pivotRow * rows(r)(0))
+            acc.updated(r, reducedRow)
+        val newRows = reducedRows // swap first- and pivot-row
+          .updated(minRow, reducedRows(0))
+          .updated(0, pivotRow)
+        newRows.head +: recurse(newRows.tail)
+      end if
     end reduced
 
     new Matrix(reduced(rows))
