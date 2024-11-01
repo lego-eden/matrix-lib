@@ -4,3 +4,4 @@
 .vscode
 *.class
 scala-doc
+playground.scala
