@@ -12,6 +12,10 @@ import util.*
 
 /** A generic, type-safe, matrix.
   *
+  * NOTE: The numeric operations on this matrix may error due to overflow. Keep
+  * this in mind when using a matrix of integers. Use a matrix of BigInt if you
+  * want guaranteed correct results when using integers.
+  *
   * @param rows
   *   the rows of the matrix
   */
@@ -241,8 +245,16 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
   def rref(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
     // the "rows" parameter is in reduced form
     def rref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
-      ???
-
+      // start with the lowest pivot row and work upwards
+      val pivotIndices = rows.filter(_.nonZero).indices
+      pivotIndices.reverse.foldLeft(rows): (rref, c) =>
+        val pivotRow = rref(c)
+        val pivot = rref(c)(c)
+        pivotIndices
+          .take(c)
+          .foldLeft(rref): (acc, r) =>
+            val reducedRow = (acc(r) * pivot) - (pivotRow * acc(r)(c))
+            acc.updated(r, reducedRow.simplify)
     end rref
 
     new Matrix(rref(ref.rows))
@@ -418,22 +430,13 @@ object Matrix:
 
     /** Compute and return the determinant of this matrix.
       *
-      * NOTE: The return value of this method may be wrong if an integer
-      * overflow occurs. To avoid this, convert the matrix elements to a type
-      * which does not have overflow such as BigInt, and then convert back.
-      *
-      * ```
-      * val mat = Matrix.fill(5, 5)(util.Random.nextInt(10))
-      * val maybeDet = mat.determinant
-      * val guaranteedDet = mat.map(BigInt(_)).determinant.toInt
-      * ```
-      *
       * @return
       *   the determinant
       */
     def determinant(using Integral[T] | Fractional[T]): T =
       val (reduced, factor, divisor) = mat.refWithTransform
       val det = reduced.diagonals.product
+      println(s"$det, $factor, $divisor")
       div(det * divisor, factor)
     end determinant
 

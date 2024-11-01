@@ -65,7 +65,7 @@ private object util:
 
   @tailrec
   def gcd[T](a: T, b: T)(using num: Integral[T]): T =
-    if b == 0 then a
+    if b == 0 then a.abs
     else gcd(b, num.rem(a, b))
 
   def div[T](a: T, b: T)(using num: Integral[T] | Fractional[T]): T =
