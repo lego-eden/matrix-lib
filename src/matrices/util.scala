@@ -7,7 +7,11 @@ import scala.annotation.tailrec
 
 private object util:
 
-  extension [T: Numeric](xs: Vector[T])
+  extension [T](xs: Vector[T])
+    def swap(i1: Int, i2: Int): Vector[T] =
+      xs.updated(i1, xs(i2)).updated(i2, xs(i1))
+
+  extension [T](xs: Vector[T])(using num: Numeric[T])
     infix def dot(ys: Vector[T]): T =
       xs.zip(ys).map(_ * _).sum
 
@@ -21,11 +25,12 @@ private object util:
     infix def nonZeroParallel(ys: Vector[T]): Boolean =
       xs.nonZero && ys.nonZero && (xs parallel ys)
 
-    def isZero: Boolean = xs.forall(_ == summon[Numeric[T]].zero)
+    def isZero: Boolean = xs.forall(_ == num.zero)
     def nonZero: Boolean = !xs.isZero
 
     def *(n: T): Vector[T] = xs.map(_ * n)
     def -(ys: Vector[T]): Vector[T] = xs.zip(ys).map((x, y) => x - y)
+    def unary_- : Vector[T] = xs * -num.one
   end extension
 
   extension [T](xs: Vector[T])(using num: Integral[T] | Fractional[T])
@@ -40,11 +45,20 @@ private object util:
             frac.fromInt(xs.map(_.toInt).gcd)
           else frac.one
 
-  extension [T](xs: Vector[T])(using num: Integral[T] | Fractional[T])
     def simplify: Vector[T] =
       val gcd = xs.gcd
-      if gcd != num.one then xs.map(div(_, gcd))
-      else xs
+      if gcd != num.one && gcd != num.zero then xs.map(div(_, gcd)) * xs.sign
+      else xs * xs.sign
+
+    def sign: T = // the sign of the pivot
+      xs.pivot match
+        case None       => num.one
+        case Some(elem) => elem.sign
+
+    def pivot: Option[T] =
+      xs.find(_ != num.zero)
+
+    def /(n: T): Vector[T] = xs.map(util.div(_, n))
 
   extension [T: Numeric](xss: Vector[Vector[T]])
     def subRegion(row: Int, col: Int): Vector[Vector[T]] =

@@ -182,51 +182,38 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     )
 
   private def refWithTransform(using
-      num: Integral[T] | Fractional[T]
-  ): (Matrix[H, W, T], T, T) =
-    // updates when swapping rows or multiplying row by constant
-    var detFactor: T = num.one
-    var detDivisor: T = num.one
-
-    def ref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
-      def recurse(rows: Vector[Vector[T]]): Vector[Vector[T]] =
-        if rows.isEmpty then rows
-        else
-          (rows.transpose.head +: // the first column
-            ref(rows.colTail).transpose // the reduced columns.tail
-          ).transpose // convert columns to rows
-
-      val nonZeroRows = rows.indices.filterNot(rows(_)(0) == num.zero)
-
-      if rows.isEmpty then rows // base case reached
-      else if nonZeroRows.isEmpty then
-        // the first column contains only zeroes. Discard it and recurse
-        recurse(rows)
-      else
-        val cols = rows.transpose
-        val minRow: Int = nonZeroRows.minBy(rows(_)(0).abs)
-
-        val pivotRow: Vector[T] = rows(minRow) * rows(minRow)(0).sign
-        if rows(minRow)(0).sign == -num.one then detFactor = -detFactor
-        val pivot: T = pivotRow(0)
-        val reducedRows = nonZeroRows
-          .filter(r => r != minRow)
-          .foldLeft(rows): (acc, r) =>
-            val scaledRow = rows(r) * pivot
-            detFactor *= pivot // row was multiplied by a constant
-            val reducedRow = scaledRow - (pivotRow * rows(r)(0))
-            acc.updated(r, reducedRow)
-        val newRows = reducedRows // swap first- and pivot-row
-          .updated(minRow, reducedRows(0))
-          .updated(0, pivotRow)
-        if minRow != 0 then
-          detFactor = -detFactor // only update the detfactor if a swap happened
-        detDivisor *= newRows.head.gcd
-        newRows.head.simplify +: recurse(newRows.tail)
-      end if
-    end ref
-
-    (new Matrix(ref(rows)), detFactor, detDivisor)
+      num: Integral[T] | Fractional[T],
+      hSize: Size[H],
+      wSize: Size[W]
+  ): Vector[Vector[T]] =
+    // idé:
+    // loopa igenom alla rader och ersätt varje rad med
+    // ((rows(i) * rows(k)(k) - rows(k) * rows(i)(k)) / rows(k - 1)(k - 1))
+    // där k är indexet för pivotraden, och i den nuvarande raden under pivotraden.
+    // Notera att för första pivotraden, alltså k = 0, rows(k - 1)(k - 1) att ge fel.
+    // Det borde ge 1.
+    var offset = 0 // this updates when a row contains only zeroes
+    (0 until ((height min width) - 1)).foldLeft(rows): (ref, pivot) =>
+      ref.indices.drop(pivot - offset).find(r => ref(r)(pivot) != 0) match
+        case None =>
+          offset += 1
+          ref
+        case Some(row) =>
+          val fixedRows =
+            val fixedRows = ref.swap(row, pivot - offset)
+            if row != (pivot - offset) then
+              fixedRows.updated(fixedRows.indices.last, -fixedRows.last)
+            else fixedRows
+          fixedRows.indices
+            .drop(pivot + 1 - offset)
+            .foldLeft(fixedRows): (acc, r) =>
+              acc.updated(
+                r,
+                ((acc(r) * acc(pivot - offset)(pivot)) -
+                  (acc(pivot - offset) * acc(r)(pivot))) / acc
+                  .applyOrElse(pivot - 1 - offset, _ => Vector())
+                  .applyOrElse(pivot - 1, _ => num.one)
+              )
   end refWithTransform
 
   /** Returns the row echelon form of this matrix.
@@ -235,30 +222,45 @@ case class Matrix[H <: Int: Size, W <: Int: Size, T] private (
     *   the row echelon form of the matrix
     */
   def ref(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
-    refWithTransform._1
+    // new Matrix(refWithTransform.map(_.simplify))
+    new Matrix(refWithTransform)
 
-  /** Returns the reduced row echelon form of this matrix.
+  /** Returns the hermite normal form of this matrix.
+    *
+    * NOTE: If the matrix does not contain integers the result of this method is
+    * not the hermite normal form, nor is it the row reduced normal form. Make
+    * of that what you will. This method is still available for all matrices
+    * since that pseudo-hermite-normal-form may be useful.
     *
     * @return
-    *   the reduced row echelon form of the matrix
+    *   the hermite normal form of the matrix
     */
-  def rref(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
+  def hnf(using Integral[T] | Fractional[T]): Matrix[H, W, T] =
     // the "rows" parameter is in reduced form
-    def rref(rows: Vector[Vector[T]]): Vector[Vector[T]] =
+    def hnf(rows: Vector[Vector[T]]): Vector[Vector[T]] =
       // start with the lowest pivot row and work upwards
       val pivotIndices = rows.filter(_.nonZero).indices
       pivotIndices.reverse.foldLeft(rows): (rref, c) =>
-        val pivotRow = rref(c)
-        val pivot = rref(c)(c)
+        val pivotRow = rref(c).simplify
+        val pivot =
+          pivotRow.pivot.get // cannot be zero since we filtered out all non-zero rows
         pivotIndices
           .take(c)
           .foldLeft(rref): (acc, r) =>
             val reducedRow = (acc(r) * pivot) - (pivotRow * acc(r)(c))
-            acc.updated(r, reducedRow.simplify)
-    end rref
+            acc.updated(c, pivotRow).updated(r, reducedRow.simplify)
+    end hnf
 
-    new Matrix(rref(ref.rows))
-  end rref
+    new Matrix(hnf(ref.rows))
+  end hnf
+
+  def rref(using Fractional[T]): Matrix[H, W, T] =
+    new Matrix(
+      hnf.rows.indices
+        .filter(r => rows(r).nonZero)
+        .map(r => rows(r) / rows(r).pivot.get)
+        .toVector
+    )
 
   override def toString: String =
     "\n" +
@@ -434,10 +436,8 @@ object Matrix:
       *   the determinant
       */
     def determinant(using Integral[T] | Fractional[T]): T =
-      val (reduced, factor, divisor) = mat.refWithTransform
-      val det = reduced.diagonals.product
-      println(s"$det, $factor, $divisor")
-      div(det * divisor, factor)
+      val ref = mat.refWithTransform
+      ref.last.last
     end determinant
 
     /** Compute and return the determinant of this matrix. Alias for
